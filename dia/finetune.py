@@ -43,28 +43,12 @@ torch.backends.cudnn.benchmark = True
 
 #bytes for language tag replacement
 LANG2BYTE = {
-    "en": 3,
-    "de": 4,
-    "fr": 5,
-    "es": 6,
-    "it": 7,
-    "nl": 14,
-    "pl": 15,
-    "pt": 16,
-    "tr": 17,
-    "hu": 18,
+    "ta":1
     
 }
 
 test_sentences = {
-    "en": "In order to fully assess performance and the accuracy of language tags, this test sentence contains multiple subordinate clauses, varied punctuation, and a sufficient word count.",
-    "de": "Um Leistung und die Korrektheit der Sprach-Tags umfassend zu prüfen, enthält dieser Testsatz mehrere Nebensätze, unterschiedliche Zeichensetzung und eine ausreichende Wortzahl.",
-    #"fr": "Pour évaluer pleinement les performances et la précision des balises de langue, cette phrase de test comporte plusieurs propositions subordonnées, une ponctuation variée et un nombre de mots suffisant.",
-    #"es": "Para evaluar completamente el rendimiento y la precisión de las etiquetas de idioma, esta frase de prueba incluye varias oraciones subordinadas, puntuación diversa y la cantidad de palabras necesaria.",
-    #"it": "Per valutare appieno le prestazioni e la precisione dei tag di lingua, questa frase di prova contiene più proposizioni subordinate, punteggiatura varia e un numero adeguato di parole.",
-    #"nl": "Om de prestaties en de nauwkeurigheid van de taaltags volledig te beoordelen, bevat deze testzin meerdere ondergeschikte zinnen, gevarieerde interpunctie en een voldoende woordenaantal.",
-    #"pl": "Aby w pełni ocenić wydajność i poprawność tagów językowych, to zdanie testowe zawiera kilka zdań podrzędnych, zróżnicowaną interpunkcję i wystarczającą liczbę słów.",
-    #"pt": "Para avaliar completamente o desempenho e a precisão das marcas de idioma, esta frase de teste contém várias orações subordinadas, pontuação diversa e um número adequado de palavras.",
+    "ta":"அப்படியும், பல்லக்கு கீழே வைக்கப்படவில்லை ஒரே மூச்சாகப் போய்க்கொண்டிருந்தது."
     #"tr": "Akışı elemeden performansı ve dil etiketlerinin doğruluğunu tam olarak değerlendirmek için bu test cümlesi birden fazla yan cümle, çeşitli noktalama işaretleri ve yeterli kelime sayısı içerir.",
     #"hu": "A teljesítmény és a nyelvcímkék pontosságának átfogó értékeléséhez ez a tesztmondat több mellékmondatot, változatos írásjeleket és elegendő szószámot tartalmazza."
 }
@@ -482,8 +466,10 @@ def train(model, dia_cfg: DiaConfig, dac_model: dac.DAC, dataset, train_cfg: Tra
 
 def main():
     args = get_args()
+    print(1)
     dia_cfg = DiaConfig.load(args.config)
-    dac_model = dac.DAC.load(dac.utils.download()).to(device)
+    print(2)
+    dac_model = dac.DAC.load(location=r"/home/adhi/adhi/dia-finetuning/weights.pth").to("cpu")
 
 
     dataset=None
@@ -534,11 +520,25 @@ def main():
     else:
         ckpt_file = hf_hub_download(args.hub_model, filename="dia-v0_1.pth")
     model = DiaModel(dia_cfg)
+
     if args.half:
-        model=model.half()
+        model = model.half()
+
+    if torch.cuda.device_count() > 1:
+        print(f"🧠 Using {torch.cuda.device_count()} GPUs with DataParallel")
+        model = torch.nn.DataParallel(model)
+
+    model = model.to(device)
+
     if args.compile:
-        model = torch.compile(model, backend="inductor")
-    model.load_state_dict(torch.load(ckpt_file, map_location="cpu"))
+        model = torch.compile(model, backend="inductor", dynamic=True)
+
+    state_dict = torch.load(ckpt_file, map_location="cpu")
+    missing, unexpected = model.load_state_dict(state_dict)
+    print("⚠️ Loaded with mismatches")
+    print("Missing keys:", missing)
+    print("Unexpected keys:", unexpected)
+
     
 
     # start training

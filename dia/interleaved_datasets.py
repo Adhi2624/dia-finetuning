@@ -5,13 +5,8 @@ from huggingface_hub import hf_hub_download
 
 
 LANG_NAME_TO_CODE = {
-    "dutch":      "nl",
-    "french":     "fr",
-    "german":     "de",
-    "italian":    "it",
-    "polish":     "pl",
-    "portuguese": "pt",
-    "spanish":    "es",
+
+    "tamil":    "ta",
     # add more if other configs appear...
 }
 
@@ -100,7 +95,7 @@ def load_common_voice17_streamed(dia_cfg, dac_model, revision="main"):
     Languages loaded: en, de, fr, es, it, nl, pl, pt, tr, hu
     """
     repo_id = "mozilla-foundation/common_voice_17_0"
-    langs = ["en", "de", "fr", "es", "it", "nl", "pl", "pt", "tr", "hu"]
+    langs = ["ta"]
 
     streams = []
     row_counts = []
