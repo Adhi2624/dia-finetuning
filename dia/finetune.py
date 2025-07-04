@@ -531,14 +531,8 @@ def main():
     model = model.to(device)
 
     if args.compile:
-        model = torch.compile(model, backend="inductor", dynamic=True)
-
-    state_dict = torch.load(ckpt_file, map_location="cpu")
-    missing, unexpected = model.load_state_dict(state_dict)
-    print("⚠️ Loaded with mismatches")
-    print("Missing keys:", missing)
-    print("Unexpected keys:", unexpected)
-
+        model = torch.compile(model, backend="inductor")
+    model.load_state_dict(torch.load(ckpt_file, map_location="cpu"))
     
 
     # start training
