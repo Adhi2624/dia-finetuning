@@ -469,7 +469,7 @@ def main():
     print(1)
     dia_cfg = DiaConfig.load(args.config)
     print(2)
-    dac_model = dac.DAC.load(location=r"/home/adhi/adhi/dia-finetuning/weights.pth").to("cpu")
+    dac_model = dac.DAC.load(dac.utils.download()).to(device)
 
 
     dataset=None
