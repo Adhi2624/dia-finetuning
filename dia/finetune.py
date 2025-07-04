@@ -532,7 +532,18 @@ def main():
 
     if args.compile:
         model = torch.compile(model, backend="inductor")
-    model.load_state_dict(torch.load(ckpt_file, map_location="cpu"))
+    state_dict = torch.load(ckpt_file, map_location="cpu")
+
+# Handle mismatch between DataParallel and non-DataParallel checkpoints
+    if isinstance(model, torch.nn.DataParallel):
+        # Add 'module.' prefix to all keys
+        new_state_dict = {"module." + k: v for k, v in state_dict.items()}
+    else:
+        # Ensure no 'module.' prefix
+        new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+
+    model.load_state_dict(new_state_dict,strict=False)
+
     
 
     # start training
