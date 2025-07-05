@@ -532,7 +532,10 @@ def main():
 
     if args.compile:
         model = torch.compile(model, backend="inductor")
-    state_dict = torch.load(ckpt_file, map_location="cpu")
+    # Make sure CUDA is available
+    device1 = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Load full checkpoint (not just weights) — ONLY IF FILE IS TRUSTED
+    state_dict = torch.load(ckpt_file, map_location=device1, weights_only=False)
 
 # Handle mismatch between DataParallel and non-DataParallel checkpoints
     if isinstance(model, torch.nn.DataParallel):
