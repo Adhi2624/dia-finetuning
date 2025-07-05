@@ -517,7 +517,7 @@ def main():
     # Load safetensors checkpoint
     ckpt_file = args.local_ckpt or hf_hub_download(args.hub_model, filename="dia-v0_1.safetensors")
     print(f"🔄 Loading .safetensors weights from: {ckpt_file}")
-    state_dict = load_file(ckpt_file, device=device)
+    state_dict = load_file(ckpt_file, device='cpu')
 
     # Fix mismatch between model and checkpoint DataParallel keys
     is_ckpt_parallel = any(k.startswith("module.") for k in state_dict.keys())
