@@ -21,7 +21,7 @@ from datasets import load_dataset, interleave_datasets, get_dataset_config_names
 from huggingface_hub import hf_hub_download
 import math
 import gc
-
+from safetensors.torch import load_file
 import dac
 from .config import DiaConfig
 from .layers import DiaModel
@@ -471,42 +471,34 @@ def main():
     print(2)
     dac_model = dac.DAC.load(dac.utils.download()).to(device)
 
+    dataset = None
 
-    dataset=None
+    # Choose dataset (local or HuggingFace)
+    if args.csv_path:
+        if not args.audio_root:
+            raise ValueError("`--audio_root` must be set when using `--csv_path`")
+        dataset = LocalDiaDataset(args.csv_path, args.audio_root, dia_cfg, dac_model)
+    else:
+        ds1 = load_dataset(args.dataset, split="train", streaming=args.streaming)
 
-
-    #dataset = load_cml_tts_streamed(dia_cfg, dac_model)
-    #dataset = load_common_voice17_streamed(dia_cfg, dac_model)
-
-    # choose dataset
-    if not dataset:
-        if args.csv_path:
-            if not args.audio_root:
-                raise ValueError("`--audio_root` must be set when using `--csv_path`")
-            dataset = LocalDiaDataset(args.csv_path, args.audio_root, dia_cfg, dac_model)
-        else:
-            # load one or two streaming HF datasets
-            ds1 = load_dataset(args.dataset, split="train", streaming=args.streaming)
-            
-            if args.streaming:
-                if args.dataset2:
-                    ds2 = load_dataset(args.dataset2, split="train", streaming=True)
-                    # sum their lengths
-                    total1 = ds1.info.splits['train'].num_examples
-                    total2 = ds2.info.splits['train'].num_examples
-                    total = total1 + total2
-                    hf_ds = interleave_datasets([ds1, ds2])
-                    dataset = HFDiaIterDataset(hf_ds, dia_cfg, dac_model)
-                    # attach total examples for loader
-                    dataset.total_examples = total
-                else:
-                    hf_ds = ds1
-                    dataset = HFDiaIterDataset(hf_ds, dia_cfg, dac_model)
+        if args.streaming:
+            if args.dataset2:
+                ds2 = load_dataset(args.dataset2, split="train", streaming=True)
+                total1 = ds1.info.splits['train'].num_examples
+                total2 = ds2.info.splits['train'].num_examples
+                total = total1 + total2
+                hf_ds = interleave_datasets([ds1, ds2])
+                dataset = HFDiaIterDataset(hf_ds, dia_cfg, dac_model)
+                dataset.total_examples = total
             else:
-                dataset = HFDiaDataset(ds1, dia_cfg, dac_model)
+                dataset = HFDiaIterDataset(ds1, dia_cfg, dac_model)
+        else:
+            dataset = HFDiaDataset(ds1, dia_cfg, dac_model)
 
-    
+    if dataset is None:
+        raise RuntimeError("No dataset was loaded. Please check your input options.")
 
+    # Setup training config
     train_cfg = TrainConfig(
         run_name   = args.run_name   or TrainConfig.run_name,
         output_dir = args.output_dir or TrainConfig.output_dir,
@@ -514,45 +506,42 @@ def main():
         seed = args.seed,
     )
 
-    # load model checkpoint
-    if args.local_ckpt:
-        ckpt_file = args.local_ckpt
-    else:
-        ckpt_file = hf_hub_download(args.hub_model, filename="dia-v0_1.pth")
+    # Initialize model
     model = DiaModel(dia_cfg)
 
     if args.half:
         model = model.half()
 
+    model = model.to(device)
+
+    # Load safetensors checkpoint
+    ckpt_file = args.local_ckpt or hf_hub_download(args.hub_model, filename="dia-v0_1.safetensors")
+    print(f"🔄 Loading .safetensors weights from: {ckpt_file}")
+    state_dict = load_file(ckpt_file, device=device)
+
+    # Fix mismatch between model and checkpoint DataParallel keys
+    is_ckpt_parallel = any(k.startswith("module.") for k in state_dict.keys())
+    is_model_parallel = isinstance(model, torch.nn.DataParallel)
+
+    if is_model_parallel and not is_ckpt_parallel:
+        state_dict = {"module." + k: v for k, v in state_dict.items()}
+    elif not is_model_parallel and is_ckpt_parallel:
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+
+    model.load_state_dict(state_dict, strict=False)
+
+    # Compile model (optional)
+    if args.compile:
+        model = torch.compile(model, backend="inductor")
+
+    # Enable DataParallel if multiple GPUs
     if torch.cuda.device_count() > 1:
         print(f"🧠 Using {torch.cuda.device_count()} GPUs with DataParallel")
         model = torch.nn.DataParallel(model)
 
-    model = model.to(device)
-
-    if args.compile:
-        model = torch.compile(model, backend="inductor")
-    # Make sure CUDA is available
-    device1 = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# Load full checkpoint (not just weights) — ONLY IF FILE IS TRUSTED
-    state_dict = torch.load(ckpt_file, map_location=device1, weights_only=False)
-
-# Handle mismatch between DataParallel and non-DataParallel checkpoints
-    if isinstance(model, torch.nn.DataParallel):
-        # Add 'module.' prefix to all keys
-        new_state_dict = {"module." + k: v for k, v in state_dict.items()}
-    else:
-        # Ensure no 'module.' prefix
-        new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-
-    model.load_state_dict(new_state_dict,strict=False)
-
-    
-
-    # start training
+    # Start training
     train(model, dia_cfg, dac_model, dataset, train_cfg)
 
 
 if __name__ == "__main__":
     main()
-
